@@ -13,13 +13,24 @@ from bot.helper.telegram_helper.message_utils import send_status_message
 
 async def add_direct_download(listener, path):
     details = listener.link
-    if not (contents := details.contents):
+    if isinstance(details, dict):
+        contents = details.get("contents")
+        total_size = details.get("total_size", 0)
+        title = details.get("title")
+        header = details.get("header")
+    else:
+        contents = getattr(details, "contents", None)
+        total_size = getattr(details, "total_size", 0)
+        title = getattr(details, "title", None)
+        header = getattr(details, "headers", None) or getattr(details, "header", None)
+
+    if not contents:
         await listener.on_download_error("There is nothing to download!")
         return
-    listener.size = details.total_size
+    listener.size = total_size
 
-    if not listener.name:
-        listener.name = details.title
+    if not listener.name and title:
+        listener.name = title
     path = f"{path}/{listener.name}"
 
     msg, button = await stop_duplicate_check(listener)
@@ -41,9 +52,13 @@ async def add_direct_download(listener, path):
             return
 
     a2c_opt = {"follow-torrent": "false", "follow-metalink": "false"}
-    if headers_dict := details.headers:
-        headers = [f"{k}: {v}" for k, v in headers_dict.items()]
-        a2c_opt["header"] = headers
+    if header:
+        if isinstance(header, dict):
+            a2c_opt["header"] = [f"{k}: {v}" for k, v in header.items()]
+        elif isinstance(header, list):
+            a2c_opt["header"] = header
+        elif isinstance(header, str):
+            a2c_opt["header"] = [h.strip() for h in header.split("\n") if h.strip()]
     directListener = DirectListener(path, listener, a2c_opt)
 
     async with task_dict_lock:

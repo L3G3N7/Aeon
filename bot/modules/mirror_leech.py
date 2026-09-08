@@ -4,9 +4,15 @@ from base64 import b64encode
 from re import match as re_match
 
 from aiofiles.os import path as aiopath
-from truelink import TrueLinkResolver
-from truelink.exceptions import TrueLinkException
-from truelink.types import FolderResult, LinkResult
+try:
+    from truelink import TrueLinkResolver
+    from truelink.exceptions import TrueLinkException
+    from truelink.types import FolderResult, LinkResult
+except ImportError:
+    TrueLinkResolver = None
+    TrueLinkException = Exception
+    FolderResult = type("FolderResult", (), {})
+    LinkResult = type("LinkResult", (), {})
 
 from bot import DOWNLOAD_DIR, LOGGER, bot_loop, task_dict_lock
 from bot.core.telegram_manager import TgClient
@@ -15,7 +21,9 @@ from bot.helper.ext_utils.bot_utils import (
     COMMAND_USAGE,
     arg_parser,
     get_content_type,
+    sync_to_async,
 )
+from bot.helper.ext_utils.exceptions import DirectDownloadLinkException
 from bot.helper.ext_utils.links_utils import (
     is_gdrive_id,
     is_gdrive_link,
@@ -30,6 +38,9 @@ from bot.helper.mirror_leech_utils.download_utils.aria2_download import (
 )
 from bot.helper.mirror_leech_utils.download_utils.direct_downloader import (
     add_direct_download,
+)
+from bot.helper.mirror_leech_utils.download_utils.direct_link_generator import (
+    direct_link_generator,
 )
 from bot.helper.mirror_leech_utils.download_utils.gd_download import add_gd_download
 from bot.helper.mirror_leech_utils.download_utils.jd_download import add_jd_download
@@ -396,34 +407,59 @@ class Mirror(TaskListener):
                 r"text/html|text/plain",
                 content_type,
             ):
-                resolver = TrueLinkResolver()
                 try:
-                    if resolver.is_supported(self.link):
-                        result = await resolver.resolve(self.link)
-                        if result:
-                            if isinstance(result, LinkResult):
-                                self.link = result.url
-                                if not self.name:
-                                    self.name = result.filename
-                            else:
-                                self.link = result
-                            if result.headers:
-                                headers = [
-                                    f"{k}: {v}" for k, v in result.headers.items()
-                                ]
-                except TrueLinkException as e:
-                    x = await send_message(self.message, e)
-                    await self.remove_from_same_dir()
-                    await delete_links(self.message)
-                    return await auto_delete_message(x, time=300)
+                    self.link = await sync_to_async(direct_link_generator, self.link)
+                    if isinstance(self.link, tuple):
+                        self.link, headers = self.link
+                    elif isinstance(self.link, str):
+                        LOGGER.info(f"Generated link: {self.link}")
+                except DirectDownloadLinkException as e:
+                    e_str = str(e)
+                    if "This link requires a password!" not in e_str:
+                        LOGGER.info(e_str)
+                    if e_str.startswith("ERROR:"):
+                        x = await send_message(self.message, e_str)
+                        await self.remove_from_same_dir()
+                        await delete_links(self.message)
+                        return await auto_delete_message(x, time=300)
                 except Exception as e:
-                    LOGGER.error(f"Unexpected exception in resolver: {e}")
-                    x = await send_message(
-                        self.message, "An unexpected error occurred."
-                    )
-                    await self.remove_from_same_dir()
-                    await delete_links(self.message)
-                    return await auto_delete_message(x, time=300)
+                    if TrueLinkResolver is not None:
+                        try:
+                            resolver = TrueLinkResolver()
+                            if resolver.is_supported(self.link):
+                                result = await resolver.resolve(self.link)
+                                if result:
+                                    if isinstance(result, LinkResult):
+                                        self.link = result.url
+                                        if not self.name:
+                                            self.name = result.filename
+                                    else:
+                                        self.link = result
+                                    if getattr(result, "headers", None):
+                                        headers = [
+                                            f"{k}: {v}" for k, v in result.headers.items()
+                                        ]
+                        except TrueLinkException as true_err:
+                            x = await send_message(self.message, true_err)
+                            await self.remove_from_same_dir()
+                            await delete_links(self.message)
+                            return await auto_delete_message(x, time=300)
+                        except Exception as res_err:
+                            LOGGER.error(f"Unexpected exception in resolver: {res_err}")
+                            x = await send_message(
+                                self.message, "An unexpected error occurred."
+                            )
+                            await self.remove_from_same_dir()
+                            await delete_links(self.message)
+                            return await auto_delete_message(x, time=300)
+                    else:
+                        LOGGER.error(f"Unexpected exception generating link: {e}")
+                        x = await send_message(
+                            self.message, f"ERROR: {e}"
+                        )
+                        await self.remove_from_same_dir()
+                        await delete_links(self.message)
+                        return await auto_delete_message(x, time=300)
 
         if file_ is not None:
             create_task(
@@ -433,7 +469,7 @@ class Mirror(TaskListener):
                     session,
                 ),
             )
-        elif isinstance(self.link, FolderResult):
+        elif isinstance(self.link, (FolderResult, dict)):
             create_task(add_direct_download(self, path))
         elif self.is_jd:
             create_task(add_jd_download(self, path))
