@@ -651,16 +651,14 @@ class TaskListener(TaskConfig):
                     elif Config.INDEX_URL:
                         INDEX_URL = Config.INDEX_URL
                     if INDEX_URL:
-                        url_path = rutils.quote(f"{name}")
+                        url_path = rutils.quote(f"{self.name}", safe="")
                         share_url = f"{INDEX_URL}/{url_path}"
                         if mime_type == "Folder":
                             share_url += "/"
-                            buttons.url_button("Index Link", share_url)
-                        else:
-                            buttons.url_button("Index Link", share_url)
-                            if mime_type.startswith(("image", "video", "audio")):
-                                share_urls = f"{INDEX_URL}/{url_path}?a=view"
-                                buttons.url_button("🌐 View Link", share_urls)
+                        buttons.url_button("Index Link", share_url)
+                        if mime_type.startswith(("image", "video", "audio")):
+                            share_urls = f"{INDEX_URL}/{url_path}?a=view"
+                            buttons.url_button("🌐 View Link", share_urls)
                 button = buttons.build_menu(2)
             else:
                 msg += f"\n\nPath: <code>{rclone_path}</code>"
