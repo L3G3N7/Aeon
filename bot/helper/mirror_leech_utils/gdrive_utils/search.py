@@ -146,7 +146,14 @@ class GoogleDriveSearch(GoogleDriveHelper):
                     msg += f"📁 <code>{file.get('name')}<br>(folder)</code><br>"
                     msg += f"<b><a href={furl}>Drive Link</a></b>"
                     if index_url:
-                        url = f"{index_url}findpath?id={file.get('id')}"
+                        if isRecur:
+                            url_path = "/".join(
+                                rutils.quote(n, safe="")
+                                for n in self.__get_recursive_list(file, dir_id)
+                            )
+                        else:
+                            url_path = rutils.quote(f"{file.get('name')}", safe="")
+                        url = f"{index_url}/{url_path}/"
                         msg += f' <b>| <a href="{url}">Index Link</a></b>'
                 elif mime_type == "application/vnd.google-apps.shortcut":
                     furl = self.G_DRIVE_DIR_BASE_DOWNLOAD_URL.format(file.get("id"))
@@ -159,12 +166,17 @@ class GoogleDriveSearch(GoogleDriveHelper):
                     msg += f"📄 <code>{file.get('name')}<br>({get_readable_file_size(int(file.get('size', 0)))})</code><br>"
                     msg += f"<b><a href={furl}>Drive Link</a></b>"
                     if index_url:
-                        url = f"{index_url}findpath?id={file.get('id')}"
+                        if isRecur:
+                            url_path = "/".join(
+                                rutils.quote(n, safe="")
+                                for n in self.__get_recursive_list(file, dir_id)
+                            )
+                        else:
+                            url_path = rutils.quote(f"{file.get('name')}", safe="")
+                        url = f"{index_url}/{url_path}"
                         msg += f' <b>| <a href="{url}">Index Link</a></b>'
                         if mime_type.startswith(("image", "video", "audio")):
-                            urlv = (
-                                f"{index_url}findpath?id={file.get('id')}&view=true"
-                            )
+                            urlv = f"{index_url}/{url_path}?a=view"
                             msg += f' <b>| <a href="{urlv}">View Link</a></b>'
                 msg += "<br><br>"
                 contents_no += 1
