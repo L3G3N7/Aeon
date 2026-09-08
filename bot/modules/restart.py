@@ -89,16 +89,15 @@ async def restart_notification():
 @new_task
 async def confirm_restart(_, query):
     await query.answer()
+
     data = query.data.split()
     message = query.message
-    await delete_message(message)
 
     if data[1] == "confirm":
-        reply_to = message.reply_to_message
         intervals["stopAll"] = True
 
         restart_message = await TgClient.bot.send_message(
-            chat_id=reply_to.chat.id,
+            chat_id=message.chat.id,
             text="Restarting...",
         )
 
@@ -152,7 +151,11 @@ async def confirm_restart(_, query):
             "-f",
             "gunicorn|xria|xnox|xtra|xone|xnzb|java|7z|split",
         )
-        proc2 = await create_subprocess_exec("python3", "update.py")
+
+        proc2 = await create_subprocess_exec(
+            "python3",
+            "update.py",
+        )
 
         await gather(proc1.wait(), proc2.wait())
 
@@ -163,5 +166,6 @@ async def confirm_restart(_, query):
             )
 
         osexecl(executable, executable, "-m", "bot")
+
     else:
         await delete_message(message)
