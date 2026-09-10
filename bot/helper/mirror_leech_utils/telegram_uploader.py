@@ -51,6 +51,24 @@ from bot.helper.telegram_helper.message_utils import delete_message
 LOGGER = getLogger(__name__)
 
 
+def parse_target(target):
+    thread_id = None
+    if isinstance(target, str):
+        target = target.strip()
+        if "|" in target:
+            target, thread_id = target.split("|", 1)
+            thread_id = int(thread_id.strip()) if thread_id.strip().isdigit() else None
+        if target.lstrip("-").isdigit():
+            target = int(target)
+        elif not target.startswith("@"):
+            target = f"@{target}"
+    elif isinstance(target, int):
+        pass
+    else:
+        return None, None
+    return target, thread_id
+
+
 class TelegramUploader:
     def __init__(self, listener, path):
         self._last_uploaded = 0
@@ -107,7 +125,10 @@ class TelegramUploader:
             self._thumb = None
 
     async def _msg_to_reply(self):
-        if self._listener.up_dest:
+        if (
+            self._listener.up_dest
+            and str(self._listener.up_dest) != str(self._listener.message.chat.id)
+        ):
             msg = self._listener.message.text.lstrip("/")
             try:
                 if self._user_session:
@@ -140,8 +161,10 @@ class TelegramUploader:
                     text="Deleted Cmd Message! Don't delete the cmd message again!",
                     disable_notification=True,
                 )
+            self._is_private = self._sent_msg.chat.type.name == "PRIVATE"
         else:
             self._sent_msg = self._listener.message
+            self._is_private = self._sent_msg.chat.type.name == "PRIVATE"
         return True
 
     async def _prepare_file(self, file_, dirpath):
@@ -426,18 +449,32 @@ class TelegramUploader:
                     return None
                 if thumb == "none":
                     thumb = None
-                self._sent_msg = await self._sent_msg.reply_video(
-                    video=self._up_path,
-                    quote=True,
-                    caption=cap_mono,
-                    duration=duration,
-                    width=width,
-                    height=height,
-                    thumb=thumb,
-                    supports_streaming=True,
-                    disable_notification=True,
-                    progress=self._upload_progress,
-                )
+
+                video_kwargs = {
+                    "video": self._up_path,
+                    "quote": True,
+                    "caption": cap_mono,
+                    "duration": duration,
+                    "width": width,
+                    "height": height,
+                    "thumb": thumb,
+                    "supports_streaming": True,
+                    "disable_notification": True,
+                    "progress": self._upload_progress,
+                }
+
+                if thumb:
+                    for cover_arg in ("video_cover", "cover"):
+                        try:
+                            test_kwargs = {**video_kwargs, cover_arg: thumb}
+                            self._sent_msg = await self._sent_msg.reply_video(**test_kwargs)
+                            break
+                        except TypeError:
+                            continue
+                    else:
+                        self._sent_msg = await self._sent_msg.reply_video(**video_kwargs)
+                else:
+                    self._sent_msg = await self._sent_msg.reply_video(**video_kwargs)
             elif is_audio:
                 key = "audios"
                 duration, artist, title = await get_media_info(self._up_path)
@@ -524,34 +561,49 @@ class TelegramUploader:
         await sleep(0.5)
 
         async def _copy(target, retries=2):
+            target_chat_id, thread_id = parse_target(target)
+            if not target_chat_id:
+                return
+
             for attempt in range(retries):
                 try:
-                    msg = await TgClient.bot.get_messages(
-                        self._sent_msg.chat.id,
-                        self._sent_msg.id,
-                    )
-                    await msg.copy(target)
+                    kwargs = {
+                        "chat_id": target_chat_id,
+                        "from_chat_id": self._sent_msg.chat.id,
+                        "message_id": self._sent_msg.id,
+                    }
+                    if thread_id:
+                        kwargs["message_thread_id"] = thread_id
+                    await TgClient.bot.copy_message(**kwargs)
                     return
                 except Exception as e:
-                    LOGGER.error(f"Attempt {attempt + 1} failed: {e} {msg.id}")
+                    LOGGER.error(f"Attempt {attempt + 1} failed to copy to {target_chat_id}: {e}")
                     if attempt < retries - 1:
                         await sleep(0.5)
-            LOGGER.error(f"Failed to copy message after {retries} attempts")
+            LOGGER.error(f"Failed to copy message after {retries} attempts to {target_chat_id}")
 
-        # TODO if self.dm_mode:
+        # If upload was in a group/channel, copy file to user PM
         if self._sent_msg.chat.id != self._user_id:
             await _copy(self._user_id)
 
+        # Custom user dump
         if self._user_dump:
             with contextlib.suppress(Exception):
-                await _copy(int(self._user_dump))
-        if (
-            isinstance(Config.LEECH_DUMP_CHAT, list)
-            and len(Config.LEECH_DUMP_CHAT) > 1
-        ):
-            for i in Config.LEECH_DUMP_CHAT[1:]:
+                await _copy(self._user_dump)
+
+        # Configured LEECH_DUMP_CHAT
+        dump_chats = Config.LEECH_DUMP_CHAT
+        if isinstance(dump_chats, list):
+            for i in dump_chats:
+                parsed_id, _ = parse_target(i)
+                if parsed_id and str(parsed_id) != str(self._sent_msg.chat.id):
+                    with contextlib.suppress(Exception):
+                        await _copy(i)
+        elif dump_chats:
+            parsed_id, _ = parse_target(dump_chats)
+            if parsed_id and str(parsed_id) != str(self._sent_msg.chat.id):
                 with contextlib.suppress(Exception):
-                    await _copy(i)
+                    await _copy(dump_chats)
 
     @property
     def speed(self):
