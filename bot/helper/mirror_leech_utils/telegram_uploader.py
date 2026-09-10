@@ -291,7 +291,7 @@ class TelegramUploader:
                             x for v in self._media_dict.values() for x in v
                         ]
                         match = re_match(
-                            r".+(?=\.0*\d+$)|.+(?=\.part\d+\..+$)",
+                            r".+(?=\..+\.0*\d+$)|.+(?=\.part\d+\..+$)",
                             f_path,
                         )
                         if not match or (
@@ -307,18 +307,48 @@ class TelegramUploader:
                                         )
                     if self._listener.hybrid_leech:
                         self._user_session = f_size > 2097152000
+                        curr_chat_id = self._sent_msg.chat.id
+                        curr_msg_id = self._sent_msg.id
                         if self._user_session:
-                            self._sent_msg = await TgClient.user.get_messages(
-                                chat_id=self._sent_msg.chat.id,
-                                message_ids=self._sent_msg.id,
+                            user_msg = await TgClient.user.get_messages(
+                                chat_id=curr_chat_id,
+                                message_ids=curr_msg_id,
                             )
-                        else:
-                            self._sent_msg = (
-                                await self._listener.client.get_messages(
-                                    chat_id=self._sent_msg.chat.id,
-                                    message_ids=self._sent_msg.id,
+                            if user_msg and not getattr(user_msg, "empty", True):
+                                self._sent_msg = user_msg
+                            else:
+                                msg_text = (
+                                    self._listener.message.text.lstrip("/")
+                                    if getattr(self._listener.message, "text", None)
+                                    else "Leech Task"
                                 )
+                                self._sent_msg = await TgClient.user.send_message(
+                                    chat_id=curr_chat_id,
+                                    text=msg_text,
+                                    message_thread_id=self._listener.chat_thread_id,
+                                    disable_notification=True,
+                                )
+                                self.log_msg = self._sent_msg
+                        else:
+                            bot_msg = await self._listener.client.get_messages(
+                                chat_id=curr_chat_id,
+                                message_ids=curr_msg_id,
                             )
+                            if bot_msg and not getattr(bot_msg, "empty", True):
+                                self._sent_msg = bot_msg
+                            else:
+                                msg_text = (
+                                    self._listener.message.text.lstrip("/")
+                                    if getattr(self._listener.message, "text", None)
+                                    else "Leech Task"
+                                )
+                                self._sent_msg = await self._listener.client.send_message(
+                                    chat_id=curr_chat_id,
+                                    text=msg_text,
+                                    message_thread_id=self._listener.chat_thread_id,
+                                    disable_notification=True,
+                                )
+                                self.log_msg = self._sent_msg
                     self._last_msg_in_group = False
                     self._last_uploaded = 0
                     await self._upload_file(cap_mono, file_, f_path)
