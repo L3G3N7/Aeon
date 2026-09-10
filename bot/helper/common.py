@@ -445,71 +445,108 @@ class TaskConfig:
                     elif self.up_dest.lower() == "pm":
                         self.up_dest = self.user_id
 
-                if self.user_transmission:
+                async def _check_user_dest():
+                    if not (self.user_transmission or self.hybrid_leech):
+                        return None, None
                     try:
-                        chat = await TgClient.user.get_chat(self.up_dest)
+                        u_chat = await TgClient.user.get_chat(self.up_dest)
                     except Exception:
-                        chat = None
-                    if chat is None:
-                        LOGGER.warning(
-                            "Account of user session can't find the destination chat!"
-                        )
-                        self.user_transmission = False
-                        self.hybrid_leech = False
-                    elif chat.type.name not in [
+                        return None, None
+                    if u_chat is None or u_chat.type.name not in [
                         "SUPERGROUP",
                         "CHANNEL",
                         "GROUP",
                         "FORUM",
                         "PRIVATE",
                     ]:
-                        self.user_transmission = False
-                        self.hybrid_leech = False
-                    elif chat.type.name == "PRIVATE":
-                        pass
-                    else:
-                        try:
-                            member = await chat.get_member(TgClient.user.me.id)
-                            if chat.type.name == "CHANNEL" and not getattr(getattr(member, "privileges", None), "can_post_messages", True):
-                                self.user_transmission = False
-                                self.hybrid_leech = False
-                                LOGGER.warning(
-                                    "User session account needs post message permissions in destination channel!"
-                                )
-                        except Exception:
-                            LOGGER.warning(
-                                "User session account is not a member or admin in the destination chat!"
-                            )
-                            self.user_transmission = False
-                            self.hybrid_leech = False
-
-                if not self.user_transmission or self.hybrid_leech:
+                        return u_chat, None
+                    if u_chat.type.name == "PRIVATE":
+                        return u_chat, True
                     try:
-                        chat = await self.client.get_chat(self.up_dest)
+                        u_mem = await u_chat.get_member(TgClient.user.me.id)
+                        return u_chat, u_mem
                     except Exception:
-                        chat = None
-                    if chat is None:
-                        if self.user_transmission:
-                            self.hybrid_leech = False
-                        else:
-                            raise ValueError("Chat not found!")
-                    elif chat.type.name in [
+                        return u_chat, False
+
+                async def _check_bot_dest():
+                    if not (not self.user_transmission or self.hybrid_leech):
+                        return None, None
+                    try:
+                        b_chat = await self.client.get_chat(self.up_dest)
+                    except Exception:
+                        return None, None
+                    if b_chat is None or b_chat.type.name not in [
                         "SUPERGROUP",
                         "CHANNEL",
                         "GROUP",
                         "FORUM",
                     ]:
-                        if not chat.is_admin:
+                        return b_chat, None
+                    try:
+                        b_mem = await b_chat.get_member(self.client.me.id)
+                        return b_chat, b_mem
+                    except Exception:
+                        return b_chat, False
+
+                (u_chat, u_mem), (b_chat, b_mem) = await gather(
+                    _check_user_dest(),
+                    _check_bot_dest(),
+                )
+
+                if self.user_transmission or self.hybrid_leech:
+                    if u_chat is None or u_chat.type.name not in [
+                        "SUPERGROUP",
+                        "CHANNEL",
+                        "GROUP",
+                        "FORUM",
+                        "PRIVATE",
+                    ]:
+                        if u_chat is None:
+                            LOGGER.warning(
+                                "Account of user session can't find the destination chat!"
+                            )
+                        self.user_transmission = False
+                        self.hybrid_leech = False
+                    elif u_chat.type.name == "PRIVATE":
+                        pass
+                    else:
+                        if u_mem in (None, False):
+                            LOGGER.warning(
+                                "User session account is not a member or admin in the destination chat!"
+                            )
+                            self.user_transmission = False
+                            self.hybrid_leech = False
+                        elif u_chat.type.name == "CHANNEL" and not getattr(getattr(u_mem, "privileges", None), "can_post_messages", False):
+                            self.user_transmission = False
+                            self.hybrid_leech = False
+                            LOGGER.warning(
+                                "User session account needs post message permissions in destination channel!"
+                            )
+
+                if not self.user_transmission or self.hybrid_leech:
+                    if b_chat is None:
+                        if self.user_transmission:
+                            self.hybrid_leech = False
+                        else:
+                            raise ValueError("Chat not found!")
+                    elif b_chat.type.name in [
+                        "SUPERGROUP",
+                        "CHANNEL",
+                        "GROUP",
+                        "FORUM",
+                    ]:
+                        if not b_chat.is_admin:
                             raise ValueError(
                                 "Bot is not admin in the destination chat!"
                             )
-                        member = await chat.get_member(self.client.me.id)
-                        if chat.type.name == "CHANNEL":
-                            if not member.privileges.can_post_messages:
+                        if b_mem in (None, False):
+                            raise ValueError("Bot is not a member of the destination chat!")
+                        if b_chat.type.name == "CHANNEL":
+                            if not getattr(getattr(b_mem, "privileges", None), "can_post_messages", False):
                                 raise ValueError(
                                     "Bot doesn't have permission to post messages in destination channel!"
                                 )
-                        elif not member.privileges.can_delete_messages:
+                        elif not getattr(getattr(b_mem, "privileges", None), "can_delete_messages", False):
                             if not self.user_transmission:
                                 raise ValueError(
                                     "You don't have enough privileges in this chat! Enable delete messages for this bot!"
@@ -541,7 +578,9 @@ class TaskConfig:
                 or Config.LEECH_SPLIT_SIZE
             )
             self.max_split_size = (
-                TgClient.MAX_SPLIT_SIZE if self.user_transmission else 2097152000
+                TgClient.MAX_SPLIT_SIZE
+                if (self.user_transmission or self.hybrid_leech)
+                else 2097152000
             )
             self.split_size = min(self.split_size, self.max_split_size)
 
