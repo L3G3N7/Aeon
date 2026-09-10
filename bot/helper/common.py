@@ -569,9 +569,11 @@ class TaskConfig:
             )
 
             if self.thumb != "none" and is_telegram_link(self.thumb):
-                msg, _ = (await get_tg_link_message(self.thumb))[0]
+                msg, _ = await get_tg_link_message(self.thumb)
+                if isinstance(msg, list) and msg:
+                    msg, _ = await get_tg_link_message(msg[0])
                 self.thumb = (
-                    await create_thumb(msg) if msg.photo or msg.document else ""
+                    await create_thumb(msg) if getattr(msg, "photo", None) or getattr(msg, "document", None) else ""
                 )
 
     def resolve_youtube_settings(self):
@@ -929,7 +931,9 @@ class TaskConfig:
                         if cmd[index + 1].startswith("mltb"):
                             var_cmd[index + 1] = file_path
                         elif is_telegram_link(cmd[index + 1]):
-                            msg = (await get_tg_link_message(cmd[index + 1]))[0]
+                            msg, _ = await get_tg_link_message(cmd[index + 1])
+                            if isinstance(msg, list) and msg:
+                                msg, _ = await get_tg_link_message(msg[0])
                             file_dir = await temp_download(msg)
                             inputs[index + 1] = file_dir
                             var_cmd[index + 1] = file_dir
@@ -986,9 +990,9 @@ class TaskConfig:
                                 if cmd[index + 1].startswith("mltb"):
                                     var_cmd[index + 1] = f_path
                                 elif is_telegram_link(cmd[index + 1]):
-                                    msg = (
-                                        await get_tg_link_message(cmd[index + 1])
-                                    )[0]
+                                    msg, _ = await get_tg_link_message(cmd[index + 1])
+                                    if isinstance(msg, list) and msg:
+                                        msg, _ = await get_tg_link_message(msg[0])
                                     file_dir = await temp_download(msg)
                                     inputs[index + 1] = file_dir
                                     var_cmd[index + 1] = file_dir
