@@ -560,6 +560,8 @@ class TelegramUploader:
     async def _copy_message(self, thumb=None):
         await sleep(0.5)
 
+        client = TgClient.user if self._user_session else TgClient.bot
+
         async def _copy(target, retries=2):
             target_chat_id, thread_id = parse_target(target)
             if not target_chat_id:
@@ -585,7 +587,7 @@ class TelegramUploader:
                                 }
                                 if thread_id:
                                     v_kwargs["message_thread_id"] = thread_id
-                                await TgClient.bot.send_video(**v_kwargs)
+                                await client.send_video(**v_kwargs)
                                 return
                             except TypeError:
                                 continue
@@ -600,7 +602,7 @@ class TelegramUploader:
                     }
                     if thread_id:
                         kwargs["message_thread_id"] = thread_id
-                    await TgClient.bot.copy_message(**kwargs)
+                    await client.copy_message(**kwargs)
                     return
                 except Exception as e:
                     LOGGER.error(f"Attempt {attempt + 1} failed to copy to {target_chat_id}: {e}")
