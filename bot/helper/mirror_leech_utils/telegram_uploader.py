@@ -145,7 +145,7 @@ class TelegramUploader:
                         message_thread_id=self._listener.chat_thread_id,
                         disable_notification=True,
                     )
-                    self._is_private = self._sent_msg.chat.type.name == "PRIVATE"
+                self._is_private = self._sent_msg.chat.type.name == "PRIVATE"
                 self.log_msg = self._sent_msg
             except Exception as e:
                 await self._listener.on_upload_error(str(e))
@@ -592,16 +592,21 @@ class TelegramUploader:
                 await _copy(self._user_dump)
 
         # Configured LEECH_DUMP_CHAT
+        def _is_primary_target(parsed_id):
+            if isinstance(parsed_id, str) and parsed_id.startswith("@"):
+                return parsed_id[1:] == getattr(self._sent_msg.chat, "username", None)
+            return str(parsed_id) == str(self._sent_msg.chat.id)
+
         dump_chats = Config.LEECH_DUMP_CHAT
         if isinstance(dump_chats, list):
             for i in dump_chats:
                 parsed_id, _ = parse_target(i)
-                if parsed_id and str(parsed_id) != str(self._sent_msg.chat.id):
+                if parsed_id and not _is_primary_target(parsed_id):
                     with contextlib.suppress(Exception):
                         await _copy(i)
         elif dump_chats:
             parsed_id, _ = parse_target(dump_chats)
-            if parsed_id and str(parsed_id) != str(self._sent_msg.chat.id):
+            if parsed_id and not _is_primary_target(parsed_id):
                 with contextlib.suppress(Exception):
                     await _copy(dump_chats)
 
