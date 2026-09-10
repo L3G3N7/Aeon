@@ -452,7 +452,7 @@ class TaskConfig:
                         chat = None
                     if chat is None:
                         LOGGER.warning(
-                            "Account of user session can't find the the destination chat!"
+                            "Account of user session can't find the destination chat!"
                         )
                         self.user_transmission = False
                         self.hybrid_leech = False
@@ -461,26 +461,27 @@ class TaskConfig:
                         "CHANNEL",
                         "GROUP",
                         "FORUM",
+                        "PRIVATE",
                     ]:
                         self.user_transmission = False
                         self.hybrid_leech = False
-                    elif chat.is_admin:
-                        member = await chat.get_member(TgClient.user.me.id)
-                        if (
-                            not member.privileges.can_manage_chat
-                            or not member.privileges.can_delete_messages
-                        ):
+                    elif chat.type.name == "PRIVATE":
+                        pass
+                    else:
+                        try:
+                            member = await chat.get_member(TgClient.user.me.id)
+                            if chat.type.name == "CHANNEL" and not getattr(getattr(member, "privileges", None), "can_post_messages", True):
+                                self.user_transmission = False
+                                self.hybrid_leech = False
+                                LOGGER.warning(
+                                    "User session account needs post message permissions in destination channel!"
+                                )
+                        except Exception:
+                            LOGGER.warning(
+                                "User session account is not a member or admin in the destination chat!"
+                            )
                             self.user_transmission = False
                             self.hybrid_leech = False
-                            LOGGER.warning(
-                                "Enable manage chat and delete messages to account of the user session from administration settings!"
-                            )
-                    else:
-                        LOGGER.warning(
-                            "Promote the account of the user session to admin in the chat to get the benefit of user transmission!"
-                        )
-                        self.user_transmission = False
-                        self.hybrid_leech = False
 
                 if not self.user_transmission or self.hybrid_leech:
                     try:
